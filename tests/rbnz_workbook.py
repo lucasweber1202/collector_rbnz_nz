@@ -63,11 +63,15 @@ def b2(values: dict[date, float] | None = None, published: date = date(2026, 9, 
         ("Cash rate", "Official Cash Rate (OCR)", "%pa", "INM.DP1.N"),
         ("Swap rates close", "2 year", "%pa", "INM.DS02.NZZC"),
     ]
-    rows: list[tuple[date, list[float | None]]] = [(when, [3.0, value, None]) for when, value in sorted(points.items())]
+    rows: list[tuple[date, list[float | None]]] = [
+        (when, [3.0, value, None]) for when, value in sorted(points.items())
+    ]
     return workbook("B2", columns, rows, published)
 
 
-def b1(values: dict[date, float], unit: str = "Index", published: date = date(2026, 9, 15)) -> bytes:
+def b1(
+    values: dict[date, float], unit: str = "Index", published: date = date(2026, 9, 15)
+) -> bytes:
     """TWI next to a decoy column. ``TEST.DECOY`` is deliberately not an RBNZ
     identifier, and the ``Index`` unit string is a test value: the live B1 unit
     text has not been observed from this environment (see METHODOLOGY.md)."""
@@ -75,5 +79,7 @@ def b1(values: dict[date, float], unit: str = "Index", published: date = date(20
         ("Exchange rates (quoted per NZ$)", "Decoy column", "USD", "TEST.DECOY"),
         ("Trade Weighted Index", "TWI (17 currencies)", unit, "EXRT.DS41.NZB17"),
     ]
-    rows: list[tuple[date, list[float | None]]] = [(when, [0.6, value]) for when, value in sorted(values.items())]
+    rows: list[tuple[date, list[float | None]]] = [
+        (when, [0.6, value]) for when, value in sorted(values.items())
+    ]
     return workbook("B1", columns, rows, published)

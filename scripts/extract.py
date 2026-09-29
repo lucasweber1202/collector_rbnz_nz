@@ -58,8 +58,22 @@ class Selected:
 
 
 SELECTED = {
-    "INM.DP1.N": Selected("B2", "Official Cash Rate (OCR)", "percent", "interest_rates", frozenset({"%pa"}), (0.0, 25.0)),
-    "EXRT.DS41.NZB17": Selected("B1", "Trade Weighted Index (TWI), 17-currency basket", "index", "exchange_rates", None, (20.0, 200.0)),
+    "INM.DP1.N": Selected(
+        "B2",
+        "Official Cash Rate (OCR)",
+        "percent",
+        "interest_rates",
+        frozenset({"%pa"}),
+        (0.0, 25.0),
+    ),
+    "EXRT.DS41.NZB17": Selected(
+        "B1",
+        "Trade Weighted Index (TWI), 17-currency basket",
+        "index",
+        "exchange_rates",
+        None,
+        (20.0, 200.0),
+    ),
 }
 DATA_SHEET = "Data"
 UNIT_ROW = 3  # zero-based: row 4 in the workbook
@@ -67,8 +81,15 @@ ID_ROW = 4  # zero-based: row 5 in the workbook
 MIN_PAYLOAD_BYTES = 5_000
 MIN_HISTORY_YEARS = 5
 MAX_STALE_DAYS = 14
-CHALLENGE_MARKERS = (b"just a moment", b"cf-mitigated", b"challenge-platform", b"website unavailable",
-                     b"captcha", b"incapsula", b"access denied")
+CHALLENGE_MARKERS = (
+    b"just a moment",
+    b"cf-mitigated",
+    b"challenge-platform",
+    b"website unavailable",
+    b"captcha",
+    b"incapsula",
+    b"access denied",
+)
 
 
 class SourceLayoutError(ValueError):
@@ -109,8 +130,14 @@ def check_payload(response: httpx.Response) -> bytes:
     blob = response.content
     lowered = blob[:4096].lower()
     content_type = response.headers.get("content-type", "").lower()
-    challenged = response.headers.get("cf-mitigated") == "challenge" or any(m in lowered for m in CHALLENGE_MARKERS)
-    if challenged or "text/html" in content_type or lowered.lstrip().startswith((b"<!doctype", b"<html")):
+    challenged = response.headers.get("cf-mitigated") == "challenge" or any(
+        m in lowered for m in CHALLENGE_MARKERS
+    )
+    if (
+        challenged
+        or "text/html" in content_type
+        or lowered.lstrip().startswith((b"<!doctype", b"<html"))
+    ):
         raise SourceAccessError(
             f"RBNZ answered HTTP {response.status_code} with a {'Cloudflare challenge' if challenged else 'HTML page'} "
             f"for {response.url}. RBNZ grants automated access by allowlisting the caller's static public IP; "
@@ -155,13 +182,17 @@ def parse_workbook(blob: bytes, table: str, url: str) -> SourceData:
     if len(rows) <= ID_ROW or rows[UNIT_ROW][0] != "Unit" or rows[ID_ROW][0] != "Series Id":
         raise SourceLayoutError(f"RBNZ {table} Data header changed")
     ids = list(rows[ID_ROW])
-    definitions = {r[2]: r for r in list(workbook["Series Definitions"].values)[1:] if r and len(r) > 3}
+    definitions = {
+        r[2]: r for r in list(workbook["Series Definitions"].values)[1:] if r and len(r) > 3
+    }
     wanted = [native for native, spec in SELECTED.items() if spec.table == table]
     catalog: dict[str, dict[str, Any]] = {}
     columns: dict[int, str] = {}
     for native in wanted:
         if ids.count(native) != 1:
-            raise SourceLayoutError(f"RBNZ {table} must list {native} exactly once (found {ids.count(native)})")
+            raise SourceLayoutError(
+                f"RBNZ {table} must list {native} exactly once (found {ids.count(native)})"
+            )
         column = ids.index(native)
         spec = SELECTED[native]
         unit = str(rows[UNIT_ROW][column] or "").strip()
@@ -218,12 +249,16 @@ def merge_files(parts: list[SourceData]) -> SourceData:
             key = (obs.series_id, obs.reference_date)
             existing = values.get(key)
             if existing is not None and abs(existing.value - obs.value) > 1e-9:
-                raise SourceLayoutError(f"RBNZ history and current files disagree at {key}: {existing.value} vs {obs.value}")
+                raise SourceLayoutError(
+                    f"RBNZ history and current files disagree at {key}: {existing.value} vs {obs.value}"
+                )
             values[key] = obs
     catalog: dict[str, dict[str, Any]] = {}
     for part in parts:
         catalog.update(part.catalog)
-    return SourceData(sorted(values.values(), key=lambda o: (o.series_id, o.reference_date)), catalog)
+    return SourceData(
+        sorted(values.values(), key=lambda o: (o.series_id, o.reference_date)), catalog
+    )
 
 
 def filter_usable_series(data: SourceData, today: date) -> SourceData:
@@ -235,14 +270,18 @@ def filter_usable_series(data: SourceData, today: date) -> SourceData:
         stale = (today - max(points)).days
         history = (max(points) - min(points)).days / 365.25
         if stale > MAX_STALE_DAYS or history < MIN_HISTORY_YEARS:
-            raise SourceLayoutError(f"RBNZ {sid} is stale ({stale} days) or short ({history:.1f} years)")
+            raise SourceLayoutError(
+                f"RBNZ {sid} is stale ({stale} days) or short ({history:.1f} years)"
+            )
     return data
 
 
 def collect() -> SourceData:
     """Download every audited workbook, pausing between requests as RBNZ asks."""
     tables: dict[str, SourceData] = {}
-    with httpx.Client(timeout=REQUEST_TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
+    with httpx.Client(
+        timeout=REQUEST_TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True
+    ) as client:
         first = True
         for table, names in FILES.items():
             parts = []
