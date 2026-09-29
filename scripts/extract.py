@@ -33,6 +33,12 @@ from scripts.config import COUNTRY_CURRENCY, DOWNLOAD_DELAY, REQUEST_TIMEOUT, US
 from scripts.releases import ReleaseEvidence
 from scripts.time_series import Observation
 
+# Canonical metadata vocabulary produced by this source.
+FREQUENCIES: frozenset[str] = frozenset({"daily"})
+UNITS: frozenset[str] = frozenset({"percent", "index"})
+ECO_GROUPS: frozenset[str] = frozenset({"interest_rates", "exchange_rates"})
+
+
 logger = logging.getLogger(__name__)
 FILE_ROOT = "https://www.rbnz.govt.nz/-/media/project/sites/rbnz/files/statistics/series/b"
 TERMS_URL = "https://www.rbnz.govt.nz/about-our-site/terms-of-use"
