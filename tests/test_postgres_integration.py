@@ -34,14 +34,20 @@ from scripts.time_series import Observation
 from tests.rbnz_workbook import b1, b2
 
 PG_URL = os.getenv("COLLECTOR_TEST_PG_URL", "")
-pytestmark = pytest.mark.skipif(not PG_URL, reason="set COLLECTOR_TEST_PG_URL to a disposable PostgreSQL database")
+pytestmark = pytest.mark.skipif(
+    not PG_URL, reason="set COLLECTOR_TEST_PG_URL to a disposable PostgreSQL database"
+)
 
 DAY1 = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
 
 
 def _sample() -> tuple[list[Observation], dict[str, dict[str, Any]]]:
     ocr = parse_workbook(b2(), "B2", "https://www.rbnz.govt.nz/b2.xlsx")
-    twi = parse_workbook(b1({date(2026, 9, 11): 68.5, date(2026, 9, 14): 68.9}), "B1", "https://www.rbnz.govt.nz/b1.xlsx")
+    twi = parse_workbook(
+        b1({date(2026, 9, 11): 68.5, date(2026, 9, 14): 68.9}),
+        "B1",
+        "https://www.rbnz.govt.nz/b1.xlsx",
+    )
     return ocr.observations + twi.observations, ocr.catalog | twi.catalog
 
 
@@ -58,7 +64,9 @@ def engine() -> Iterator[Engine]:
     eng.dispose()
 
 
-def _write(eng: Engine, observations: list[Observation], catalog: dict[str, dict[str, Any]], at: datetime) -> Any:
+def _write(
+    eng: Engine, observations: list[Observation], catalog: dict[str, dict[str, Any]], at: datetime
+) -> Any:
     with eng.begin() as conn:
         result = time_series.upsert_time_series(conn, observations, at)
         counts = metadata.upsert_metadata(conn, catalog, at)
@@ -67,10 +75,14 @@ def _write(eng: Engine, observations: list[Observation], catalog: dict[str, dict
 
 def _rows(eng: Engine, table: str) -> list[dict[str, Any]]:
     with eng.connect() as conn:
-        return [dict(r) for r in conn.execute(text(f"SELECT * FROM {SCHEMA_NAME}.{table}")).mappings()]
+        return [
+            dict(r) for r in conn.execute(text(f"SELECT * FROM {SCHEMA_NAME}.{table}")).mappings()
+        ]
 
 
-def _replace(observations: list[Observation], series_id: str, when: date, value: float) -> list[Observation]:
+def _replace(
+    observations: list[Observation], series_id: str, when: date, value: float
+) -> list[Observation]:
     return [
         Observation(o.series_id, o.reference_date, value, o.snapshot_id)
         if (o.series_id, o.reference_date) == (series_id, when)
@@ -84,7 +96,8 @@ def test_init_db_creates_the_canonical_tables_idempotently(engine: Engine) -> No
     with engine.connect() as conn:
         tables: set[str] = set(
             conn.execute(
-                text("SELECT table_name FROM information_schema.tables WHERE table_schema = :s"), {"s": SCHEMA_NAME}
+                text("SELECT table_name FROM information_schema.tables WHERE table_schema = :s"),
+                {"s": SCHEMA_NAME},
             ).scalars()
         )
     assert tables == {"metadata", "time_series", "logs"}
@@ -103,14 +116,23 @@ def test_first_run_then_unchanged_rerun_is_a_no_op(engine: Engine) -> None:
     assert counts == (len(catalog), 0)
     before_ts, before_md = _rows(engine, "time_series"), _rows(engine, "metadata")
     result, counts = _write(engine, observations, catalog, DAY1 + timedelta(days=3))
-    assert (result.new_observations, result.new_vintages, result.same_day_updates, counts) == (0, 0, 0, (0, 0))
+    assert (result.new_observations, result.new_vintages, result.same_day_updates, counts) == (
+        0,
+        0,
+        0,
+        (0, 0),
+    )
     assert _rows(engine, "time_series") == before_ts
     assert _rows(engine, "metadata") == before_md
     assert {r["vintage_date"] for r in before_ts} == {DAY1.date()}
     for row in before_md:
         dates = sorted(o.reference_date for o in observations if o.series_id == row["series_id"])
         assert row["country"] == COUNTRY_CURRENCY
-        assert (row["first_observation"], row["last_observation"], row["observation_count"]) == (dates[0], dates[-1], len(dates))
+        assert (row["first_observation"], row["last_observation"], row["observation_count"]) == (
+            dates[0],
+            dates[-1],
+            len(dates),
+        )
         assert row["collected_at"] == DAY1.replace(tzinfo=None)
 
 
@@ -119,7 +141,12 @@ def test_later_revision_adds_a_vintage_and_keeps_the_old_one(engine: Engine) -> 
     _write(engine, observations, catalog, DAY1)
     target = observations[-1]
     later = DAY1 + timedelta(days=30)
-    result, _ = _write(engine, _replace(observations, target.series_id, target.reference_date, target.value + 1), catalog, later)
+    result, _ = _write(
+        engine,
+        _replace(observations, target.series_id, target.reference_date, target.value + 1),
+        catalog,
+        later,
+    )
     assert (result.new_observations, result.new_vintages, result.same_day_updates) == (0, 1, 0)
     rows = sorted(
         (r["vintage_date"], r["value"])
@@ -135,9 +162,18 @@ def test_same_day_revision_updates_that_days_vintage(engine: Engine) -> None:
     observations, catalog = _sample()
     _write(engine, observations, catalog, DAY1)
     target = observations[0]
-    result, _ = _write(engine, _replace(observations, target.series_id, target.reference_date, target.value + 2), catalog, DAY1 + timedelta(hours=2))
+    result, _ = _write(
+        engine,
+        _replace(observations, target.series_id, target.reference_date, target.value + 2),
+        catalog,
+        DAY1 + timedelta(hours=2),
+    )
     assert (result.new_observations, result.new_vintages, result.same_day_updates) == (0, 0, 1)
-    rows = [r for r in _rows(engine, "time_series") if (r["series_id"], r["reference_date"]) == (target.series_id, target.reference_date)]
+    rows = [
+        r
+        for r in _rows(engine, "time_series")
+        if (r["series_id"], r["reference_date"]) == (target.series_id, target.reference_date)
+    ]
     assert len(rows) == 1 and rows[0]["value"] == target.value + 2
     assert rows[0]["collected_at"] == (DAY1 + timedelta(hours=2)).replace(tzinfo=None)
 
@@ -147,11 +183,26 @@ def test_metadata_merge_accepts_null_in_every_nullable_column(engine: Engine) ->
     _write(engine, observations, catalog, DAY1)
     series_id = min(catalog)
     row: dict[str, Any] = {column: None for column in metadata._COLUMNS}
-    row.update(series_id=series_id, name="n", country=COUNTRY_CURRENCY, observation_count=1, source_url="https://example.invalid/x", collected_at=DAY1)
+    row.update(
+        series_id=series_id,
+        name="n",
+        country=COUNTRY_CURRENCY,
+        observation_count=1,
+        source_url="https://example.invalid/x",
+        collected_at=DAY1,
+    )
     with engine.begin() as conn:
         conn.execute(metadata._merge_statement(1), metadata._batch_parameters([row]))
     stored = next(r for r in _rows(engine, "metadata") if r["series_id"] == series_id)
-    for column in ("description", "frequency", "unit", "first_observation", "last_observation", "eco_group", "last_publish_date"):
+    for column in (
+        "description",
+        "frequency",
+        "unit",
+        "first_observation",
+        "last_observation",
+        "eco_group",
+        "last_publish_date",
+    ):
         assert stored[column] is None, column
     _, counts = _write(engine, observations, catalog, DAY1 + timedelta(days=1))
     assert counts == (0, 1)
@@ -161,10 +212,20 @@ def test_time_series_merge_statement_runs_on_postgres(engine: Engine) -> None:
     observations, catalog = _sample()
     _write(engine, observations, catalog, DAY1)
     target = observations[0]
-    row = {"series_id": target.series_id, "reference_date": target.reference_date, "vintage_date": DAY1.date(), "value": 123.25, "collected_at": DAY1 + timedelta(hours=1)}
+    row = {
+        "series_id": target.series_id,
+        "reference_date": target.reference_date,
+        "vintage_date": DAY1.date(),
+        "value": 123.25,
+        "collected_at": DAY1 + timedelta(hours=1),
+    }
     with engine.begin() as conn:
         conn.execute(time_series._merge_statement(1), time_series._batch_parameters([row]))
-    rows = [r for r in _rows(engine, "time_series") if (r["series_id"], r["reference_date"]) == (target.series_id, target.reference_date)]
+    rows = [
+        r
+        for r in _rows(engine, "time_series")
+        if (r["series_id"], r["reference_date"]) == (target.series_id, target.reference_date)
+    ]
     assert [r["value"] for r in rows] == [123.25]
 
 
@@ -173,28 +234,39 @@ def test_run_log_insert_with_null_traceback_and_truncation(engine: Engine) -> No
     run_logs.insert_run_log(engine, DAY1, DAY1, "error", "x" * 70000, "trace")
     rows = sorted(_rows(engine, "logs"), key=lambda r: r["id"])
     assert rows[0]["traceback"] is None and rows[0]["status"] == "success"
-    assert len(rows[1]["log_text"]) == 65535 and rows[1]["log_text"].endswith("[..., truncated ...]")
+    assert len(rows[1]["log_text"]) == 65535 and rows[1]["log_text"].endswith(
+        "[..., truncated ...]"
+    )
 
 
 def test_release_status_from_stored_state(engine: Engine) -> None:
     observations, catalog = _sample()
     ids = sorted(catalog)
     latest = max(o.reference_date for o in observations)
-    published = max((entry["last_publish_date"] for entry in catalog.values() if entry["last_publish_date"]), default=None)
+    published = max(
+        (entry["last_publish_date"] for entry in catalog.values() if entry["last_publish_date"]),
+        default=None,
+    )
     with engine.connect() as conn:
         assert stored_release(conn, ids) is None
     assert classify_release(None, published, latest, 1) == FIRST_RELEASE
     _write(engine, observations, catalog, DAY1)
     with engine.connect() as conn:
         previous = stored_release(conn, ids)
-    assert previous is not None and previous.published == published and previous.latest_reference == latest
+    assert (
+        previous is not None
+        and previous.published == published
+        and previous.latest_reference == latest
+    )
     assert classify_release(previous, published, latest, 0) == SAME_RELEASE
     assert classify_release(previous, published, latest, 1) == REVISED_SOURCE
     later = None if published is None else published + timedelta(days=7)
     assert classify_release(previous, later, latest + timedelta(days=7), 1) == NEW_RELEASE
 
 
-def test_pipeline_end_to_end_behind_a_mocked_rbnz(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pipeline_end_to_end_behind_a_mocked_rbnz(
+    engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """main.main() from HTTP to PostgreSQL, twice, with workbooks in RBNZ's layout.
 
     Only the network is replaced: RBNZ blocks this environment's egress (see
@@ -211,19 +283,34 @@ def test_pipeline_end_to_end_behind_a_mocked_rbnz(engine: Engine, monkeypatch: p
     history_days = [date(2017, 12, 1) + timedelta(days=d) for d in range(29)]
     current_days = [today - timedelta(days=d) for d in range(0, 6 * 366, 7)]
     files = {
-        extract.file_url("B2", "hb2-daily-close-1985-2017"): b2({d: 1.75 for d in history_days}, published=date(2018, 1, 5)),
-        extract.file_url("B2", "hb2-daily-close"): b2({d: 2.75 for d in current_days}, published=today),
-        extract.file_url("B1", "hb1-daily-1999-2017"): b1({d: 75.0 for d in history_days}, published=date(2018, 1, 5)),
+        extract.file_url("B2", "hb2-daily-close-1985-2017"): b2(
+            {d: 1.75 for d in history_days}, published=date(2018, 1, 5)
+        ),
+        extract.file_url("B2", "hb2-daily-close"): b2(
+            {d: 2.75 for d in current_days}, published=today
+        ),
+        extract.file_url("B1", "hb1-daily-1999-2017"): b1(
+            {d: 75.0 for d in history_days}, published=date(2018, 1, 5)
+        ),
         extract.file_url("B1", "hb1-daily"): b1({d: 68.0 for d in current_days}, published=today),
     }
     requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requested.append(str(request.url))
-        return httpx.Response(200, content=files[str(request.url)], headers={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
+        return httpx.Response(
+            200,
+            content=files[str(request.url)],
+            headers={
+                "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            },
+        )
 
     real_client = httpx.Client
-    monkeypatch.setattr("scripts.extract.httpx.Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    monkeypatch.setattr(
+        "scripts.extract.httpx.Client",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
     monkeypatch.setattr("scripts.extract.DOWNLOAD_DELAY", 0.0)
     monkeypatch.setattr(pipeline, "build_engine", lambda: create_engine(PG_URL))
     monkeypatch.setattr(pipeline, "missing_environment", list)

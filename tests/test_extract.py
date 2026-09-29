@@ -1,4 +1,5 @@
 """RBNZ workbook contract: IDs, layout, blanks, stitching, access failures."""
+
 from __future__ import annotations
 
 import os
@@ -38,7 +39,10 @@ def test_ids_are_the_audited_native_codes() -> None:
 
 
 def test_official_file_urls() -> None:
-    assert file_url("B2", "hb2-daily-close") == "https://www.rbnz.govt.nz/-/media/project/sites/rbnz/files/statistics/series/b/b2/hb2-daily-close.xlsx"
+    assert (
+        file_url("B2", "hb2-daily-close")
+        == "https://www.rbnz.govt.nz/-/media/project/sites/rbnz/files/statistics/series/b/b2/hb2-daily-close.xlsx"
+    )
     assert file_url("B1", "hb1-daily-1999-2017").endswith("/b/b1/hb1-daily-1999-2017.xlsx")
 
 
@@ -46,7 +50,12 @@ def test_ocr_is_located_by_series_id_and_matches_the_published_values() -> None:
     data = parse_workbook(b2(), "B2", "https://www.rbnz.govt.nz/x.xlsx")
     assert {(o.reference_date, o.value) for o in data.observations} == set(OCR_PUBLISHED.items())
     entry = data.catalog[OCR]
-    assert (entry["unit"], entry["frequency"], entry["eco_group"], entry["country"]) == ("percent", "daily", "interest_rates", "NZD")
+    assert (entry["unit"], entry["frequency"], entry["eco_group"], entry["country"]) == (
+        "percent",
+        "daily",
+        "interest_rates",
+        "NZD",
+    )
     assert entry["last_publish_date"] == date(2026, 9, 15)
     assert "source unit %pa" in entry["description"]
     metadata.validate_catalog(data.catalog)
@@ -62,7 +71,10 @@ def test_blank_cells_are_absent_not_zero() -> None:
 def test_twi_parses_with_its_source_unit_recorded() -> None:
     data = parse_workbook(b1({date(2026, 9, 14): 68.9}), "B1", "u")
     assert [(o.series_id, o.value) for o in data.observations] == [(TWI, 68.9)]
-    assert data.catalog[TWI]["unit"] == "index" and "source unit Index" in data.catalog[TWI]["description"]
+    assert (
+        data.catalog[TWI]["unit"] == "index"
+        and "source unit Index" in data.catalog[TWI]["description"]
+    )
 
 
 def test_layout_and_value_drift_fail() -> None:
@@ -109,17 +121,39 @@ CHALLENGE = b'<!DOCTYPE html><html lang="en"><head><title>Just a moment...</titl
 
 
 def test_cloudflare_challenge_fails_deterministically_with_the_remedy() -> None:
-    response = httpx.Response(403, content=CHALLENGE, headers={"content-type": "text/html; charset=UTF-8", "cf-mitigated": "challenge"}, request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"))
+    response = httpx.Response(
+        403,
+        content=CHALLENGE,
+        headers={"content-type": "text/html; charset=UTF-8", "cf-mitigated": "challenge"},
+        request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"),
+    )
     with pytest.raises(SourceAccessError, match="allowlisting"):
         check_payload(response)
-    ok_but_html = httpx.Response(200, content=b"<html>Website unavailable</html>", headers={"content-type": "text/html"}, request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"))
+    ok_but_html = httpx.Response(
+        200,
+        content=b"<html>Website unavailable</html>",
+        headers={"content-type": "text/html"},
+        request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"),
+    )
     with pytest.raises(SourceAccessError):
         check_payload(ok_but_html)
-    not_xlsx = httpx.Response(200, content=b"x" * 10000, headers={"content-type": "application/octet-stream"}, request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"))
+    not_xlsx = httpx.Response(
+        200,
+        content=b"x" * 10000,
+        headers={"content-type": "application/octet-stream"},
+        request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"),
+    )
     with pytest.raises(SourceAccessError, match="not an XLSX"):
         check_payload(not_xlsx)
     blob = b2()
-    fine = httpx.Response(200, content=blob, headers={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}, request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"))
+    fine = httpx.Response(
+        200,
+        content=blob,
+        headers={
+            "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        },
+        request=httpx.Request("GET", "https://www.rbnz.govt.nz/x.xlsx"),
+    )
     assert check_payload(fine) == blob
 
 
@@ -128,17 +162,26 @@ def test_collect_stops_on_the_first_challenge(monkeypatch: pytest.MonkeyPatch) -
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
-        return httpx.Response(403, content=CHALLENGE, headers={"cf-mitigated": "challenge", "content-type": "text/html"})
+        return httpx.Response(
+            403,
+            content=CHALLENGE,
+            headers={"cf-mitigated": "challenge", "content-type": "text/html"},
+        )
 
     monkeypatch.setattr("scripts.extract.DOWNLOAD_DELAY", 0.0)
     real_client = httpx.Client
-    monkeypatch.setattr("scripts.extract.httpx.Client", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    monkeypatch.setattr(
+        "scripts.extract.httpx.Client",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
     with pytest.raises(SourceAccessError, match="Cloudflare challenge"):
         collect()
     assert len(calls) == 1
 
 
-@pytest.mark.skipif(os.getenv("RBNZ_LIVE_SMOKE") != "1", reason="opt-in; needs an RBNZ-allowlisted IP")
+@pytest.mark.skipif(
+    os.getenv("RBNZ_LIVE_SMOKE") != "1", reason="opt-in; needs an RBNZ-allowlisted IP"
+)
 def test_live_official_workbooks() -> None:
     result = collect()
     ocr = {o.reference_date: o.value for o in result.observations if o.series_id == OCR}
